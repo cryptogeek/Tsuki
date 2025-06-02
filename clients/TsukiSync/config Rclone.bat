@@ -1,0 +1,1 @@
+rcloneSyncBin.exe config --config=rclone.conf

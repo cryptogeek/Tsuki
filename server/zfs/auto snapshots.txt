@@ -1,0 +1,166 @@
+#auto snapshot script:
+echo "" > /root/autozfssnapshot.sh
+sudo nano /root/autozfssnapshot.sh
+
+################
+#!/bin/bash
+
+# Set your ZFS dataset name (passed as an argument)
+DATASET=$1
+POOL="mypool"  # Change this if you want the clones in a different pool
+
+# Check if dataset name is passed
+if [ -z "$DATASET" ]; then
+  echo "Usage: $0 <dataset>"
+  exit 1
+fi
+
+# Sanitize the dataset name for use in clone names
+DATASET_SANITIZED=$(echo "$DATASET" | sed 's/\//_/g')
+
+# Get the current date and time
+TODAY=$(date +%Y-%m-%d)
+MONTH=$(date +%Y-%m)
+HOUR=$(date +%H)
+HOURLY_SNAPSHOT="${DATASET}@hourly-${TODAY}-${HOUR}"
+DAILY_SNAPSHOT="${DATASET}@daily-${TODAY}"
+MONTHLY_SNAPSHOT="${DATASET}@monthly-${MONTH}"
+CLONE_PREFIX="${POOL}/clone-${DATASET_SANITIZED}-"
+
+# Number of hourly, daily, and monthly snapshots to keep
+HOURLY_LIMIT=24
+DAILY_LIMIT=30
+MONTHLY_LIMIT=12
+
+# Function to get clone name from snapshot name
+get_clone_name() {
+  local SNAPSHOT_NAME=$1
+  local SNAPSHOT_SUFFIX=$(echo "$SNAPSHOT_NAME" | cut -d'@' -f2)
+  echo "${CLONE_PREFIX}${SNAPSHOT_SUFFIX}"
+}
+
+# Function to create a clone from a snapshot
+create_clone() {
+  local SNAPSHOT=$1
+  local CLONE_NAME=$2
+
+  if zfs list -o name | grep -q "^${CLONE_NAME}$"; then
+    echo "Clone $CLONE_NAME already exists, skipping creation."
+  else
+    local MOUNTPOINT="/zfsclones/${DATASET}/$(basename $CLONE_NAME)"
+    echo "Creating clone: $CLONE_NAME from snapshot: $SNAPSHOT"
+    zfs clone -o mountpoint="$MOUNTPOINT" "$SNAPSHOT" "$CLONE_NAME"
+  fi
+}
+
+# Function to create hourly snapshot and corresponding clone
+create_hourly_snapshot() {
+  if zfs list -t snapshot | grep -q "$HOURLY_SNAPSHOT"; then
+    echo "Hourly snapshot $HOURLY_SNAPSHOT already exists, skipping creation."
+  else
+    echo "Creating hourly snapshot: $HOURLY_SNAPSHOT"
+    zfs snapshot "$HOURLY_SNAPSHOT"
+    HOURLY_CLONE=$(get_clone_name "$HOURLY_SNAPSHOT")
+    create_clone "$HOURLY_SNAPSHOT" "$HOURLY_CLONE"
+  fi
+}
+
+# Function to create daily snapshot and corresponding clone
+create_daily_snapshot() {
+  if zfs list -t snapshot | grep -q "$DAILY_SNAPSHOT"; then
+    echo "Daily snapshot $DAILY_SNAPSHOT already exists, skipping creation."
+  else
+    echo "Creating daily snapshot: $DAILY_SNAPSHOT"
+    zfs snapshot "$DAILY_SNAPSHOT"
+    DAILY_CLONE=$(get_clone_name "$DAILY_SNAPSHOT")
+    create_clone "$DAILY_SNAPSHOT" "$DAILY_CLONE"
+  fi
+}
+
+# Function to create monthly snapshot and corresponding clone
+create_monthly_snapshot() {
+  if [ "$(date +%d)" = "01" ]; then
+    if zfs list -t snapshot | grep -q "$MONTHLY_SNAPSHOT"; then
+      echo "Monthly snapshot $MONTHLY_SNAPSHOT already exists, skipping creation."
+    else
+      echo "Creating monthly snapshot: $MONTHLY_SNAPSHOT"
+      zfs snapshot "$MONTHLY_SNAPSHOT"
+      MONTHLY_CLONE=$(get_clone_name "$MONTHLY_SNAPSHOT")
+      create_clone "$MONTHLY_SNAPSHOT" "$MONTHLY_CLONE"
+    fi
+  else
+    echo "Today is not the first of the month, skipping monthly snapshot."
+  fi
+}
+
+# Function to delete old clones
+delete_clone() {
+  local CLONE_NAME=$1
+  if zfs list -o name | grep -q "^${CLONE_NAME}$"; then
+    echo "Deleting clone: $CLONE_NAME"
+    zfs destroy "$CLONE_NAME"
+	# Remove mountpoint directory if it exists and is empty
+	local MOUNTPOINT="/zfsclones/${DATASET}/$(basename $CLONE_NAME)"
+	if [ -d "$MOUNTPOINT" ]; then
+      rmdir "$MOUNTPOINT"
+      echo "Removed mountpoint directory: $MOUNTPOINT"
+    fi
+  else
+    echo "Clone $CLONE_NAME does not exist, skipping."
+  fi
+}
+
+# Function to delete old snapshots and corresponding clones
+delete_old_snapshots() {
+  echo "Deleting old snapshots and their corresponding clones..."
+
+  # Delete old hourly snapshots and clones
+  HOURLY_SNAPSHOTS=$(zfs list -t snapshot -o name -S creation | grep "${DATASET}@hourly-" | tail -n +$((HOURLY_LIMIT + 1)))
+  for SNAPSHOT in $HOURLY_SNAPSHOTS; do
+    HOURLY_CLONE=$(get_clone_name "$SNAPSHOT")
+    delete_clone "$HOURLY_CLONE"
+    echo "Deleting hourly snapshot: $SNAPSHOT"
+    zfs destroy "$SNAPSHOT"
+  done
+
+  # Delete old daily snapshots and clones
+  DAILY_SNAPSHOTS=$(zfs list -t snapshot -o name -S creation | grep "${DATASET}@daily-" | tail -n +$((DAILY_LIMIT + 1)))
+  for SNAPSHOT in $DAILY_SNAPSHOTS; do
+    DAILY_CLONE=$(get_clone_name "$SNAPSHOT")
+    delete_clone "$DAILY_CLONE"
+    echo "Deleting daily snapshot: $SNAPSHOT"
+    zfs destroy "$SNAPSHOT"
+  done
+
+  # Delete old monthly snapshots and clones
+  MONTHLY_SNAPSHOTS=$(zfs list -t snapshot -o name -S creation | grep "${DATASET}@monthly-" | tail -n +$((MONTHLY_LIMIT + 1)))
+  for SNAPSHOT in $MONTHLY_SNAPSHOTS; do
+    MONTHLY_CLONE=$(get_clone_name "$SNAPSHOT")
+    delete_clone "$MONTHLY_CLONE"
+    echo "Deleting monthly snapshot: $SNAPSHOT"
+    zfs destroy "$SNAPSHOT"
+  done
+}
+
+# Create snapshots and clones
+create_hourly_snapshot
+create_daily_snapshot
+create_monthly_snapshot
+
+# Purge old snapshots and clones
+delete_old_snapshots
+
+echo "Snapshot and clone process completed."
+#############
+
+chmod +x /root/autozfssnapshot.sh
+
+/root/autozfssnapshot.sh mypool/mydataset
+
+zfs list -t snapshot
+
+
+VISUAL=nano crontab -e
+
+0 3 * * * /usr/sbin/zpool scrub mypool
+0 * * * * /root/autozfssnapshot.sh mypool/mydataset > /var/log/zfs_snapshot_mydataset.log 2>&1

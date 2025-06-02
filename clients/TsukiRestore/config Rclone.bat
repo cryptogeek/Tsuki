@@ -1,0 +1,1 @@
+rcloneRestore-Rclone.exe config --config=rclone.conf

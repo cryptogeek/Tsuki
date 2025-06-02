@@ -1,0 +1,23 @@
+sudo apt update
+
+sudo apt install zfsutils-linux
+
+sudo zpool create mypool /dev/nvme0n1p6 /dev/nvme1n1p5
+
+sudo zfs set compression=lz4 mypool
+
+sudo zfs get compression mypool
+
+sudo zfs create mypool/mydataset
+
+zpool list
+
+zfs list
+
+VISUAL=nano crontab -e
+
+@reboot /usr/bin/sleep 60 && /usr/sbin/zpool import mypool >/dev/null 2>&1
+
+extra:
+zfs set quota=10G tank/home/jeff
+zfs get quota tank/home/jeff

@@ -1,0 +1,13 @@
+lsblk
+
+parted /dev/nvme0n1
+
+print free
+
+mkpart primary [Start] [End]
+example:
+mkpart primary 12.1GB 960GB
+
+quit
+
+q

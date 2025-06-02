@@ -1,0 +1,41 @@
+sudo add-apt-repository ppa:sftpgo/sftpgo
+
+sudo apt update
+
+sudo apt install sftpgo
+
+systemctl status sftpgo
+
+sudo journalctl -u sftpgo -b --no-pager -n 100
+
+change admin gui listening port:
+
+sudo nano /etc/sftpgo/sftpgo.json
+
+find section that looks like this and edit port:
+"httpd": {
+    "bindings": [
+      {
+        "port": 8081,
+        "address": "127.0.0.1",
+		
+change sftp listening port:
+
+sudo nano /etc/sftpgo/sftpgo.json
+
+find section that looks like this and edit port:
+"sftpd": {
+    "bindings": [
+      {
+        "port": 2027,
+        "address": "",
+
+
+sudo systemctl restart sftpgo
+
+systemctl status sftpgo
+
+sudo netstat -lnptu
+
+sftpgo user has to own all the roots for sftp to work correctly:
+chown sftpgo:sftpgo -R /pathtorootfolderofauser

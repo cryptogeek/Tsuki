@@ -1,0 +1,2 @@
+zfs list -H -o name,origin | awk '$2 != "-" {print $1}' | while read clone; do echo "Deleting clone: $clone"; zfs destroy "$clone"; done
+zfs list -H -t snapshot -o name -r mypool | while read snap; do echo "Deleting snapshot: $snap"; zfs destroy "$snap"; done
